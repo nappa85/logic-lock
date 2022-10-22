@@ -1,4 +1,4 @@
-use std::{future::Future, pin::Pin};
+use std::{borrow::Cow, future::Future, pin::Pin};
 
 use sea_orm::{
     ConnectionTrait, DatabaseTransaction, DbBackend, DbErr, ExecResult, QueryResult, Statement,
@@ -15,7 +15,7 @@ pub struct Lock<'a, C>
 where
     C: ConnectionTrait + std::fmt::Debug,
 {
-    key: String,
+    key: Cow<'a, str>,
     conn: Option<Cown<'a, C>>,
 }
 
@@ -110,7 +110,7 @@ where
         timeout: Option<u8>,
     ) -> Result<Lock<'a, C>, Error<'a, C>>
     where
-        S: Into<String> + std::fmt::Debug,
+        S: Into<Cow<'a, str>> + std::fmt::Debug,
         CC: Into<Cown<'a, C>> + std::fmt::Debug,
     {
         let key = key.into();
@@ -120,7 +120,7 @@ where
             String::from("SELECT GET_LOCK(?, ?) AS res"),
         );
         stmt.values = Some(Values(vec![
-            Value::from(key.as_str()),
+            Value::from(key.as_ref()),
             Value::from(timeout.unwrap_or(1)),
         ]));
         let res = conn
@@ -153,7 +153,7 @@ where
         if_let_unreachable!(self.conn, conn => {
             let mut stmt =
                 Statement::from_string(conn.get_database_backend(), String::from("SELECT RELEASE_LOCK(?) AS res"));
-            stmt.values = Some(Values(vec![Value::from(self.key.as_str())]));
+            stmt.values = Some(Values(vec![Value::from(self.key.as_ref())]));
             let res = conn
                 .query_one(stmt)
                 .await
@@ -179,9 +179,9 @@ pub enum Error<'a, C>
 where
     C: ConnectionTrait + std::fmt::Debug,
 {
-    Locking(String, Option<DbErr>),
-    LockFailed(String),
-    Unlocking(String, Option<DbErr>),
+    Locking(Cow<'a, str>, Option<DbErr>),
+    LockFailed(Cow<'a, str>),
+    Unlocking(Cow<'a, str>, Option<DbErr>),
     UnlockFailed(Lock<'a, C>),
 }
 
