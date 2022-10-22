@@ -7,16 +7,16 @@ use sea_orm::{
 
 use tracing::{error, instrument};
 
-mod cown;
-pub use cown::Cown;
+// mod cown;
+// pub use cown::Cown;
 
 #[derive(Debug)]
-pub struct Lock<'a, C>
+pub struct Lock<'key, C>
 where
     C: ConnectionTrait + std::fmt::Debug,
 {
-    key: Cow<'a, str>,
-    conn: Option<Cown<'a, C>>,
+    key: Cow<'key, str>,
+    conn: Option<C>,
 }
 
 macro_rules! if_let_unreachable {
@@ -30,7 +30,7 @@ macro_rules! if_let_unreachable {
 }
 
 #[async_trait::async_trait]
-impl<'a, C> ConnectionTrait for Lock<'a, C>
+impl<'key, C> ConnectionTrait for Lock<'key, C>
 where
     C: ConnectionTrait + std::fmt::Debug + Send,
 {
@@ -51,22 +51,22 @@ where
     }
 }
 
-impl<'a, C> StreamTrait<'a> for Lock<'a, C>
+impl<'key, C> StreamTrait<'key> for Lock<'key, C>
 where
-    C: ConnectionTrait + StreamTrait<'a> + std::fmt::Debug,
+    C: ConnectionTrait + StreamTrait<'key> + std::fmt::Debug,
 {
     type Stream = C::Stream;
 
     fn stream(
-        &'a self,
+        &'key self,
         stmt: Statement,
-    ) -> Pin<Box<dyn Future<Output = Result<Self::Stream, DbErr>> + 'a + Send>> {
+    ) -> Pin<Box<dyn Future<Output = Result<Self::Stream, DbErr>> + 'key + Send>> {
         if_let_unreachable!(self.conn, conn => conn.stream(stmt))
     }
 }
 
 #[async_trait::async_trait]
-impl<'a, C> TransactionTrait for Lock<'a, C>
+impl<'key, C> TransactionTrait for Lock<'key, C>
 where
     C: ConnectionTrait + TransactionTrait + std::fmt::Debug + Send,
 {
@@ -87,7 +87,7 @@ where
     }
 }
 
-impl<'a, C> Drop for Lock<'a, C>
+impl<'key, C> Drop for Lock<'key, C>
 where
     C: ConnectionTrait + std::fmt::Debug,
 {
@@ -99,22 +99,20 @@ where
     }
 }
 
-impl<'a, C> Lock<'a, C>
+impl<'key, C> Lock<'key, C>
 where
-    C: ConnectionTrait + std::fmt::Debug + 'a,
+    C: ConnectionTrait + std::fmt::Debug,
 {
     #[instrument(level = "trace")]
-    pub async fn build<S, CC>(
+    pub async fn build<S>(
         key: S,
-        conn: CC,
+        conn: C,
         timeout: Option<u8>,
-    ) -> Result<Lock<'a, C>, Error<'a, C>>
+    ) -> Result<Lock<'key, C>, Error<'key, C>>
     where
-        S: Into<Cow<'a, str>> + std::fmt::Debug,
-        CC: Into<Cown<'a, C>> + std::fmt::Debug,
+        S: Into<Cow<'key, str>> + std::fmt::Debug,
     {
         let key = key.into();
-        let conn = conn.into();
         let mut stmt = Statement::from_string(
             conn.get_database_backend(),
             String::from("SELECT GET_LOCK(?, ?) AS res"),
@@ -142,19 +140,14 @@ where
             Err(Error::LockFailed(key))
         }
     }
-}
 
-impl<'a, C> Lock<'a, C>
-where
-    C: ConnectionTrait + std::fmt::Debug,
-{
     #[must_use]
     pub fn get_key(&self) -> &str {
         self.key.as_ref()
     }
 
     #[instrument(level = "trace")]
-    pub async fn release(mut self) -> Result<Cown<'a, C>, Error<'a, C>> {
+    pub async fn release(mut self) -> Result<C, Error<'key, C>> {
         if_let_unreachable!(self.conn, conn => {
             let mut stmt =
                 Statement::from_string(conn.get_database_backend(), String::from("SELECT RELEASE_LOCK(?) AS res"));
@@ -180,17 +173,17 @@ where
 }
 
 #[derive(Debug)]
-pub enum Error<'a, C>
+pub enum Error<'key, C>
 where
     C: ConnectionTrait + std::fmt::Debug,
 {
-    Locking(Cow<'a, str>, Option<DbErr>),
-    LockFailed(Cow<'a, str>),
-    Unlocking(Cow<'a, str>, Option<DbErr>),
-    UnlockFailed(Lock<'a, C>),
+    Locking(Cow<'key, str>, Option<DbErr>),
+    LockFailed(Cow<'key, str>),
+    Unlocking(Cow<'key, str>, Option<DbErr>),
+    UnlockFailed(Lock<'key, C>),
 }
 
-impl<'a, C> std::fmt::Display for Error<'a, C>
+impl<'key, C> std::fmt::Display for Error<'key, C>
 where
     C: ConnectionTrait + std::fmt::Debug,
 {
@@ -212,7 +205,7 @@ where
     }
 }
 
-impl<'a, C> std::error::Error for Error<'a, C> where C: ConnectionTrait + std::fmt::Debug {}
+impl<'key, C> std::error::Error for Error<'key, C> where C: ConnectionTrait + std::fmt::Debug {}
 
 #[cfg(test)]
 mod tests {
@@ -251,17 +244,14 @@ mod tests {
         let txn = conn.begin().await?;
         let lock = super::Lock::build("barfoo", txn, None).await.unwrap();
         let res = generic_method_who_needs_a_connection(&lock).await;
-        if let super::Cown::Owned(txn) = lock.release().await.unwrap() {
-            txn.commit().await?;
-        } else {
-            unreachable!();
-        }
+        let txn = lock.release().await.unwrap();
+        txn.commit().await?;
         res
     }
 
-    async fn generic_method_who_makes_a_stream<'a, C>(conn: &'a C) -> Result<bool, DbErr>
+    async fn generic_method_who_makes_a_stream<'key, C>(conn: &'key C) -> Result<bool, DbErr>
     where
-        C: ConnectionTrait + StreamTrait<'a> + std::fmt::Debug,
+        C: ConnectionTrait + StreamTrait<'key> + std::fmt::Debug,
     {
         let stmt =
             Statement::from_string(conn.get_database_backend(), String::from("SELECT 1 AS res"));
@@ -283,11 +273,8 @@ mod tests {
         let txn = conn.begin().await?;
         let lock = super::Lock::build("barfoo", txn, None).await.unwrap();
         let res = generic_method_who_makes_a_stream(&lock).await;
-        if let super::Cown::Owned(txn) = lock.release().await.unwrap() {
-            txn.commit().await?;
-        } else {
-            unreachable!();
-        }
+        let txn = lock.release().await.unwrap();
+        txn.commit().await?;
         res
     }
 
@@ -297,7 +284,7 @@ mod tests {
 
         let conn = get_conn().await;
 
-        let lock = super::Lock::build("foobar", &conn, None).await.unwrap();
+        let lock = super::Lock::build("foobar", conn, None).await.unwrap();
         let res = generic_method_who_needs_a_connection(&lock).await;
         assert!(lock.release().await.is_ok());
         res.unwrap();
@@ -320,7 +307,7 @@ mod tests {
 
         let conn = get_conn().await;
 
-        let lock = super::Lock::build("foobar", &conn, None).await.unwrap();
+        let lock = super::Lock::build("foobar", conn, None).await.unwrap();
         let res = generic_method_who_makes_a_stream(&lock).await;
         assert!(lock.release().await.is_ok());
         res.unwrap();
