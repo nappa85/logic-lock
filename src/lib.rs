@@ -142,7 +142,12 @@ where
             Err(Error::LockFailed(key))
         }
     }
+}
 
+impl<'a, C> Lock<'a, C>
+where
+    C: ConnectionTrait + std::fmt::Debug,
+{
     #[must_use]
     pub fn get_key(&self) -> &str {
         self.key.as_ref()
