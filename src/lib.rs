@@ -121,15 +121,16 @@ where
             Value::from(key.as_ref()),
             Value::from(timeout.unwrap_or(1)),
         ]));
-        let res = conn
-            .query_one(stmt)
-            .await
-            .map_err(|e| Error::Locking(key.clone(), Some(e)))?
-            .ok_or_else(|| Error::Locking(key.clone(), None))?;
-        let lock = res
-            .try_get::<Option<bool>>("", "res")
-            .map_err(|e| Error::Locking(key.clone(), Some(e)))?
-            .ok_or_else(|| Error::Locking(key.clone(), None))?;
+        let res = match conn.query_one(stmt).await {
+            Ok(Some(res)) => res,
+            Ok(None) => return Err(Error::Locking(key, conn, None)),
+            Err(e) => return Err(Error::Locking(key, conn, Some(e))),
+        };
+        let lock = match res.try_get::<Option<bool>>("", "res") {
+            Ok(Some(res)) => res,
+            Ok(None) => return Err(Error::Locking(key, conn, None)),
+            Err(e) => return Err(Error::Locking(key, conn, Some(e))),
+        };
 
         if lock {
             Ok(Lock {
@@ -137,7 +138,7 @@ where
                 conn: Some(conn),
             })
         } else {
-            Err(Error::LockFailed(key))
+            Err(Error::LockFailed(key, conn))
         }
     }
 
@@ -152,15 +153,16 @@ where
             let mut stmt =
                 Statement::from_string(conn.get_database_backend(), String::from("SELECT RELEASE_LOCK(?) AS res"));
             stmt.values = Some(Values(vec![Value::from(self.key.as_ref())]));
-            let res = conn
-                .query_one(stmt)
-                .await
-                .map_err(|e| Error::Unlocking(self.key.clone(), Some(e)))?
-                .ok_or_else(|| Error::Unlocking(self.key.clone(), None))?;
-            let released = res
-                .try_get::<Option<bool>>("", "res")
-                .map_err(|e| Error::Unlocking(self.key.clone(), Some(e)))?
-                .ok_or_else(|| Error::Unlocking(self.key.clone(), None))?;
+            let res = match conn.query_one(stmt).await {
+                Ok(Some(res)) => res,
+                Ok(None) => return Err(Error::Unlocking(self, None)),
+                Err(e) => return Err(Error::Unlocking(self, Some(e))),
+            };
+            let released = match res.try_get::<Option<bool>>("", "res") {
+                Ok(Some(res)) => res,
+                Ok(None) => return Err(Error::Unlocking(self, None)),
+                Err(e) => return Err(Error::Unlocking(self, Some(e))),
+            };
 
             if released {
                 Ok(self.conn.take().unwrap())
@@ -177,9 +179,9 @@ pub enum Error<'key, C>
 where
     C: ConnectionTrait + std::fmt::Debug,
 {
-    Locking(Cow<'key, str>, Option<DbErr>),
-    LockFailed(Cow<'key, str>),
-    Unlocking(Cow<'key, str>, Option<DbErr>),
+    Locking(Cow<'key, str>, C, Option<DbErr>),
+    LockFailed(Cow<'key, str>, C),
+    Unlocking(Lock<'key, C>, Option<DbErr>),
     UnlockFailed(Lock<'key, C>),
 }
 
@@ -189,16 +191,22 @@ where
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Error::Locking(key, Some(e)) => write!(f, "error while locking for key {}: {}", key, e),
-            Error::Locking(key, None) => {
+            Error::Locking(key, _, Some(e)) => {
+                write!(f, "error while locking for key {}: {}", key, e)
+            }
+            Error::Locking(key, _, None) => {
                 write!(f, "error while locking for key {}: unknown error", key)
             }
-            Error::LockFailed(key) => write!(f, "lock failed for key {}", key),
-            Error::Unlocking(key, Some(e)) => {
-                write!(f, "error while unlocking for key {}: {}", key, e)
+            Error::LockFailed(key, _) => write!(f, "lock failed for key {}", key),
+            Error::Unlocking(lock, Some(e)) => {
+                write!(f, "error while unlocking for key {}: {}", lock.get_key(), e)
             }
-            Error::Unlocking(key, None) => {
-                write!(f, "error while unlocking for key {}: unknown error", key)
+            Error::Unlocking(lock, None) => {
+                write!(
+                    f,
+                    "error while unlocking for key {}: unknown error",
+                    lock.get_key()
+                )
             }
             Error::UnlockFailed(lock) => write!(f, "unlock failed for key {}", lock.get_key()),
         }
