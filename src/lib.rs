@@ -172,6 +172,12 @@ where
             }
         })
     }
+
+    /// forgets the lock and returns inner connection
+    #[must_use]
+    pub fn into_inner(mut self) -> C {
+        self.conn.take().unwrap()
+    }
 }
 
 #[derive(Debug)]
