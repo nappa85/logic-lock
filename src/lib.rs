@@ -51,16 +51,16 @@ where
     }
 }
 
-impl<'key, C> StreamTrait<'key> for Lock<'key, C>
+impl<'key, C> StreamTrait for Lock<'key, C>
 where
-    C: ConnectionTrait + StreamTrait<'key> + std::fmt::Debug,
+    C: ConnectionTrait + StreamTrait + std::fmt::Debug,
 {
-    type Stream = C::Stream;
+    type Stream<'a> = C::Stream<'a> where Self: 'a;
 
-    fn stream(
-        &'key self,
+    fn stream<'a>(
+        &'a self,
         stmt: Statement,
-    ) -> Pin<Box<dyn Future<Output = Result<Self::Stream, DbErr>> + 'key + Send>> {
+    ) -> Pin<Box<dyn Future<Output = Result<Self::Stream<'a>, DbErr>> + 'a + Send>> {
         if_let_unreachable!(self.conn, conn => conn.stream(stmt))
     }
 }
@@ -263,9 +263,9 @@ mod tests {
         res
     }
 
-    async fn generic_method_who_makes_a_stream<'key, C>(conn: &'key C) -> Result<bool, DbErr>
+    async fn generic_method_who_makes_a_stream<C>(conn: &C) -> Result<bool, DbErr>
     where
-        C: ConnectionTrait + StreamTrait<'key> + std::fmt::Debug,
+        C: ConnectionTrait + StreamTrait + std::fmt::Debug,
     {
         let stmt =
             Statement::from_string(conn.get_database_backend(), String::from("SELECT 1 AS res"));
