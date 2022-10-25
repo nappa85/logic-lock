@@ -1,4 +1,4 @@
-use std::{borrow::Cow, future::Future, pin::Pin};
+use std::{future::Future, pin::Pin};
 
 use sea_orm::{
     ConnectionTrait, DatabaseTransaction, DbBackend, DbErr, ExecResult, QueryResult, Statement,
@@ -11,11 +11,11 @@ use tracing::{error, instrument};
 // pub use cown::Cown;
 
 #[derive(Debug)]
-pub struct Lock<'key, C>
+pub struct Lock<C>
 where
     C: ConnectionTrait + std::fmt::Debug,
 {
-    key: Cow<'key, str>,
+    key: String,
     conn: Option<C>,
 }
 
@@ -30,7 +30,7 @@ macro_rules! if_let_unreachable {
 }
 
 #[async_trait::async_trait]
-impl<'key, C> ConnectionTrait for Lock<'key, C>
+impl<C> ConnectionTrait for Lock<C>
 where
     C: ConnectionTrait + std::fmt::Debug + Send,
 {
@@ -51,7 +51,7 @@ where
     }
 }
 
-impl<'key, C> StreamTrait for Lock<'key, C>
+impl<C> StreamTrait for Lock<C>
 where
     C: ConnectionTrait + StreamTrait + std::fmt::Debug,
 {
@@ -66,7 +66,7 @@ where
 }
 
 #[async_trait::async_trait]
-impl<'key, C> TransactionTrait for Lock<'key, C>
+impl<C> TransactionTrait for Lock<C>
 where
     C: ConnectionTrait + TransactionTrait + std::fmt::Debug + Send,
 {
@@ -87,7 +87,7 @@ where
     }
 }
 
-impl<'key, C> Drop for Lock<'key, C>
+impl<C> Drop for Lock<C>
 where
     C: ConnectionTrait + std::fmt::Debug,
 {
@@ -99,7 +99,7 @@ where
     }
 }
 
-impl<'key, C> Lock<'key, C>
+impl<C> Lock<C>
 where
     C: ConnectionTrait + std::fmt::Debug,
 {
@@ -108,9 +108,9 @@ where
         key: S,
         conn: C,
         timeout: Option<u8>,
-    ) -> Result<Lock<'key, C>, Error<'key, C>>
+    ) -> Result<Lock<C>, Error<C>>
     where
-        S: Into<Cow<'key, str>> + std::fmt::Debug,
+        S: Into<String> + std::fmt::Debug,
     {
         let key = key.into();
         let mut stmt = Statement::from_string(
@@ -118,7 +118,7 @@ where
             String::from("SELECT GET_LOCK(?, ?) AS res"),
         );
         stmt.values = Some(Values(vec![
-            Value::from(key.as_ref()),
+            Value::from(key.as_str()),
             Value::from(timeout.unwrap_or(1)),
         ]));
         let res = match conn.query_one(stmt).await {
@@ -148,11 +148,11 @@ where
     }
 
     #[instrument(level = "trace")]
-    pub async fn release(mut self) -> Result<C, Error<'key, C>> {
+    pub async fn release(mut self) -> Result<C, Error<C>> {
         if_let_unreachable!(self.conn, conn => {
             let mut stmt =
                 Statement::from_string(conn.get_database_backend(), String::from("SELECT RELEASE_LOCK(?) AS res"));
-            stmt.values = Some(Values(vec![Value::from(self.key.as_ref())]));
+            stmt.values = Some(Values(vec![Value::from(self.key.as_str())]));
             let res = match conn.query_one(stmt).await {
                 Ok(Some(res)) => res,
                 Ok(None) => return Err(Error::Unlocking(self, None)),
@@ -181,17 +181,17 @@ where
 }
 
 #[derive(Debug)]
-pub enum Error<'key, C>
+pub enum Error<C>
 where
     C: ConnectionTrait + std::fmt::Debug,
 {
-    Locking(Cow<'key, str>, C, Option<DbErr>),
-    LockFailed(Cow<'key, str>, C),
-    Unlocking(Lock<'key, C>, Option<DbErr>),
-    UnlockFailed(Lock<'key, C>),
+    Locking(String, C, Option<DbErr>),
+    LockFailed(String, C),
+    Unlocking(Lock<C>, Option<DbErr>),
+    UnlockFailed(Lock<C>),
 }
 
-impl<'key, C> std::fmt::Display for Error<'key, C>
+impl<C> std::fmt::Display for Error<C>
 where
     C: ConnectionTrait + std::fmt::Debug,
 {
@@ -219,7 +219,7 @@ where
     }
 }
 
-impl<'key, C> std::error::Error for Error<'key, C> where C: ConnectionTrait + std::fmt::Debug {}
+impl<C> std::error::Error for Error<C> where C: ConnectionTrait + std::fmt::Debug {}
 
 #[cfg(test)]
 mod tests {
