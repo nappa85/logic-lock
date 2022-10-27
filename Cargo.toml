@@ -2,6 +2,13 @@
 name = "logic-lock"
 version = "0.1.0"
 edition = "2021"
+authors = ["Marco Napetti"]
+repository = "https://github.com/nappa85/logic-lock"
+description = "MySQL logic locks implemented over sea-orm"
+readme = "README.md"
+keywords = ["mysql", "lock", "orm"]
+categories = ["database"]
+license = "MIT"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
