@@ -2,12 +2,15 @@ use std::{error::Error, fmt};
 
 use sea_orm::{ConnectionTrait, DbErr};
 
+/// Lock errors
 #[derive(Debug)]
 pub enum Lock<C>
 where
     C: ConnectionTrait + fmt::Debug,
 {
+    /// Database errors while locking
     DbErr(String, C, Option<DbErr>),
+    /// Lock failed
     Failed(String, C),
 }
 
@@ -30,12 +33,15 @@ where
 
 impl<C> Error for Lock<C> where C: ConnectionTrait + fmt::Debug {}
 
+/// Unlock errors
 #[derive(Debug)]
 pub enum Unlock<C>
 where
     C: ConnectionTrait + fmt::Debug,
 {
+    /// Database errors while unlocking
     DbErr(super::Lock<C>, Option<DbErr>),
+    /// Unlock failed
     Failed(super::Lock<C>),
 }
 

@@ -1,3 +1,10 @@
+#![deny(warnings)]
+#![deny(missing_docs)]
+
+//! # logic-lock
+//!
+//! MySQL logic locks implemented over sea-orm
+
 use std::{future::Future, pin::Pin};
 
 use sea_orm::{
@@ -7,8 +14,10 @@ use sea_orm::{
 
 use tracing::{error, instrument};
 
+/// Lock and Unlock error types
 pub mod error;
 
+/// Lock entity
 #[derive(Debug)]
 pub struct Lock<C>
 where
@@ -102,6 +111,9 @@ impl<C> Lock<C>
 where
     C: ConnectionTrait + std::fmt::Debug,
 {
+    /// Lock builder
+    /// Takes anything can become a String as key, an owned connection (it can be a `sea_orm::DatabaseConnection`,
+    /// a `sea_orm::DatabaseTransaction or another `Lock` himself), and an optional timeout in seconds, defaulting to 1 second
     #[instrument(level = "trace")]
     pub async fn build<S>(key: S, conn: C, timeout: Option<u8>) -> Result<Lock<C>, error::Lock<C>>
     where
@@ -137,11 +149,14 @@ where
         }
     }
 
+    /// returns locked key
     #[must_use]
     pub fn get_key(&self) -> &str {
         self.key.as_ref()
     }
 
+    /// releases the lock, returning the owned connection on success
+    /// on error it will return the `Lock` himself alongside with the database error, if any
     #[instrument(level = "trace")]
     pub async fn release(mut self) -> Result<C, error::Unlock<C>> {
         if_let_unreachable!(self.conn, conn => {
@@ -169,6 +184,7 @@ where
     }
 
     /// forgets the lock and returns inner connection
+    /// WARNING: the lock will continue to live in the database session
     #[must_use]
     pub fn into_inner(mut self) -> C {
         self.conn.take().unwrap()
