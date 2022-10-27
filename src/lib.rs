@@ -200,11 +200,22 @@ mod tests {
 
     use tokio_stream::StreamExt;
 
+    fn metric_mysql(info: &sea_orm::metric::Info<'_>) {
+        tracing::debug!(
+            "mysql query{} took {}s: {}",
+            if info.failed { " failed" } else { "" },
+            info.elapsed.as_secs_f64(),
+            info.statement.sql
+        );
+    }
+
     async fn get_conn() -> DatabaseConnection {
         let url = std::env::var("DATABASE_URL");
-        Database::connect(url.as_deref().unwrap_or("mysql://root@127.0.0.1/test"))
+        let mut conn = Database::connect(url.as_deref().unwrap_or("mysql://root@127.0.0.1/test"))
             .await
-            .unwrap()
+            .unwrap();
+        conn.set_metric_callback(metric_mysql);
+        conn
     }
 
     async fn generic_method_who_needs_a_connection<C>(conn: &C) -> Result<bool, DbErr>
