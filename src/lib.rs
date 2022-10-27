@@ -7,8 +7,7 @@ use sea_orm::{
 
 use tracing::{error, instrument};
 
-// mod cown;
-// pub use cown::Cown;
+pub mod error;
 
 #[derive(Debug)]
 pub struct Lock<C>
@@ -104,11 +103,7 @@ where
     C: ConnectionTrait + std::fmt::Debug,
 {
     #[instrument(level = "trace")]
-    pub async fn build<S>(
-        key: S,
-        conn: C,
-        timeout: Option<u8>,
-    ) -> Result<Lock<C>, Error<C>>
+    pub async fn build<S>(key: S, conn: C, timeout: Option<u8>) -> Result<Lock<C>, error::Lock<C>>
     where
         S: Into<String> + std::fmt::Debug,
     {
@@ -123,13 +118,13 @@ where
         ]));
         let res = match conn.query_one(stmt).await {
             Ok(Some(res)) => res,
-            Ok(None) => return Err(Error::Locking(key, conn, None)),
-            Err(e) => return Err(Error::Locking(key, conn, Some(e))),
+            Ok(None) => return Err(error::Lock::DbErr(key, conn, None)),
+            Err(e) => return Err(error::Lock::DbErr(key, conn, Some(e))),
         };
         let lock = match res.try_get::<Option<bool>>("", "res") {
             Ok(Some(res)) => res,
-            Ok(None) => return Err(Error::Locking(key, conn, None)),
-            Err(e) => return Err(Error::Locking(key, conn, Some(e))),
+            Ok(None) => return Err(error::Lock::DbErr(key, conn, None)),
+            Err(e) => return Err(error::Lock::DbErr(key, conn, Some(e))),
         };
 
         if lock {
@@ -138,7 +133,7 @@ where
                 conn: Some(conn),
             })
         } else {
-            Err(Error::LockFailed(key, conn))
+            Err(error::Lock::Failed(key, conn))
         }
     }
 
@@ -148,27 +143,27 @@ where
     }
 
     #[instrument(level = "trace")]
-    pub async fn release(mut self) -> Result<C, Error<C>> {
+    pub async fn release(mut self) -> Result<C, error::Unlock<C>> {
         if_let_unreachable!(self.conn, conn => {
             let mut stmt =
                 Statement::from_string(conn.get_database_backend(), String::from("SELECT RELEASE_LOCK(?) AS res"));
             stmt.values = Some(Values(vec![Value::from(self.key.as_str())]));
             let res = match conn.query_one(stmt).await {
                 Ok(Some(res)) => res,
-                Ok(None) => return Err(Error::Unlocking(self, None)),
-                Err(e) => return Err(Error::Unlocking(self, Some(e))),
+                Ok(None) => return Err(error::Unlock::DbErr(self, None)),
+                Err(e) => return Err(error::Unlock::DbErr(self, Some(e))),
             };
             let released = match res.try_get::<Option<bool>>("", "res") {
                 Ok(Some(res)) => res,
-                Ok(None) => return Err(Error::Unlocking(self, None)),
-                Err(e) => return Err(Error::Unlocking(self, Some(e))),
+                Ok(None) => return Err(error::Unlock::DbErr(self, None)),
+                Err(e) => return Err(error::Unlock::DbErr(self, Some(e))),
             };
 
             if released {
                 Ok(self.conn.take().unwrap())
             }
             else {
-                Err(Error::UnlockFailed(self))
+                Err(error::Unlock::Failed(self))
             }
         })
     }
@@ -179,47 +174,6 @@ where
         self.conn.take().unwrap()
     }
 }
-
-#[derive(Debug)]
-pub enum Error<C>
-where
-    C: ConnectionTrait + std::fmt::Debug,
-{
-    Locking(String, C, Option<DbErr>),
-    LockFailed(String, C),
-    Unlocking(Lock<C>, Option<DbErr>),
-    UnlockFailed(Lock<C>),
-}
-
-impl<C> std::fmt::Display for Error<C>
-where
-    C: ConnectionTrait + std::fmt::Debug,
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Error::Locking(key, _, Some(e)) => {
-                write!(f, "error while locking for key {}: {}", key, e)
-            }
-            Error::Locking(key, _, None) => {
-                write!(f, "error while locking for key {}: unknown error", key)
-            }
-            Error::LockFailed(key, _) => write!(f, "lock failed for key {}", key),
-            Error::Unlocking(lock, Some(e)) => {
-                write!(f, "error while unlocking for key {}: {}", lock.get_key(), e)
-            }
-            Error::Unlocking(lock, None) => {
-                write!(
-                    f,
-                    "error while unlocking for key {}: unknown error",
-                    lock.get_key()
-                )
-            }
-            Error::UnlockFailed(lock) => write!(f, "unlock failed for key {}", lock.get_key()),
-        }
-    }
-}
-
-impl<C> std::error::Error for Error<C> where C: ConnectionTrait + std::fmt::Debug {}
 
 #[cfg(test)]
 mod tests {
