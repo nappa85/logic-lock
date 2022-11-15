@@ -8,8 +8,8 @@
 use std::{future::Future, pin::Pin};
 
 use sea_orm::{
-    ConnectionTrait, DatabaseTransaction, DbBackend, DbErr, ExecResult, QueryResult, Statement,
-    StreamTrait, TransactionError, TransactionTrait, Value, Values,
+    AccessMode, ConnectionTrait, DatabaseTransaction, DbBackend, DbErr, ExecResult, IsolationLevel,
+    QueryResult, Statement, StreamTrait, TransactionError, TransactionTrait, Value, Values,
 };
 
 use tracing::{error, instrument};
@@ -82,6 +82,14 @@ where
         if_let_unreachable!(self.conn, conn => conn.begin().await)
     }
 
+    async fn begin_with_config(
+        &self,
+        isolation_level: Option<IsolationLevel>,
+        access_mode: Option<AccessMode>,
+    ) -> Result<DatabaseTransaction, DbErr> {
+        if_let_unreachable!(self.conn, conn => conn.begin_with_config(isolation_level, access_mode).await)
+    }
+
     async fn transaction<F, T, E>(&self, callback: F) -> Result<T, TransactionError<E>>
     where
         F: for<'c> FnOnce(
@@ -92,6 +100,23 @@ where
         E: std::error::Error + Send,
     {
         if_let_unreachable!(self.conn, conn => conn.transaction(callback).await)
+    }
+
+    async fn transaction_with_config<F, T, E>(
+        &self,
+        callback: F,
+        isolation_level: Option<IsolationLevel>,
+        access_mode: Option<AccessMode>,
+    ) -> Result<T, TransactionError<E>>
+    where
+        F: for<'c> FnOnce(
+                &'c DatabaseTransaction,
+            ) -> Pin<Box<dyn Future<Output = Result<T, E>> + Send + 'c>>
+            + Send,
+        T: Send,
+        E: std::error::Error + Send,
+    {
+        if_let_unreachable!(self.conn, conn => conn.transaction_with_config(callback, isolation_level, access_mode).await)
     }
 }
 
