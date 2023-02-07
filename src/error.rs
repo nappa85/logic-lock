@@ -21,12 +21,12 @@ where
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Lock::DbErr(key, _, Some(e)) => {
-                write!(f, "error while locking for key {}: {}", key, e)
+                write!(f, "error while locking for key {key}: {e}")
             }
             Lock::DbErr(key, _, None) => {
-                write!(f, "error while locking for key {}: unknown error", key)
+                write!(f, "error while locking for key {key}: unknown error")
             }
-            Lock::Failed(key, _) => write!(f, "lock failed for key {}", key),
+            Lock::Failed(key, _) => write!(f, "lock failed for key {key}"),
         }
     }
 }

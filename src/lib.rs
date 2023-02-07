@@ -50,12 +50,24 @@ where
         if_let_unreachable!(self.conn, conn => conn.execute(stmt).await)
     }
 
+    async fn execute_unprepared(&self, sql: &str) -> Result<ExecResult, DbErr> {
+        if_let_unreachable!(self.conn, conn => conn.execute_unprepared(sql).await)
+    }
+
     async fn query_one(&self, stmt: Statement) -> Result<Option<QueryResult>, DbErr> {
         if_let_unreachable!(self.conn, conn => conn.query_one(stmt).await)
     }
 
     async fn query_all(&self, stmt: Statement) -> Result<Vec<QueryResult>, DbErr> {
         if_let_unreachable!(self.conn, conn => conn.query_all(stmt).await)
+    }
+
+    fn support_returning(&self) -> bool {
+        if_let_unreachable!(self.conn, conn => conn.support_returning())
+    }
+
+    fn is_mock_connection(&self) -> bool {
+        if_let_unreachable!(self.conn, conn => conn.is_mock_connection())
     }
 }
 
