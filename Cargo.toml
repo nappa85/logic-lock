@@ -1,6 +1,6 @@
 [package]
 name = "logic-lock"
-version = "0.12.0"
+version = "1.0.0"
 edition = "2021"
 authors = ["Marco Napetti"]
 repository = "https://github.com/nappa85/logic-lock"
@@ -15,11 +15,15 @@ license = "MIT"
 
 [dependencies]
 async-trait = "0.1.64"
-sea-orm = "0.12.0"
+sea-orm = "1.0.0"
 tracing = "0.1.37"
 
 [dev-dependencies]
-sea-orm = { version = "0.12.0", features = ["sqlx-mysql", "runtime-tokio-rustls", "debug-print"] }
+sea-orm = { version = "1.0.0", features = [
+    "sqlx-mysql",
+    "runtime-tokio-rustls",
+    "debug-print",
+] }
 tokio = { version = "1.25.0", features = ["rt", "macros"] }
 tokio-stream = "0.1.11"
 tracing-subscriber = "0.3.16"
